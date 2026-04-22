@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../features/chat/data/api_service.dart';
 import '../features/chat/data/chat_storage_service.dart';
@@ -29,9 +30,11 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
   final ChatStorageService _chatStorageService = ChatStorageService();
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final ImagePicker _imagePicker = ImagePicker();
 
   List<ChatSession> _chatSessions = [];
   String? _activeChatId;
+  String? _attachedImagePath;
 
   static const List<_NavItem> _navItems = [
     _NavItem(
@@ -64,31 +67,27 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
   @override
   void initState() {
     super.initState();
+    _chatController.addListener(_handleComposerChanged);
     _loadChats();
   }
 
   @override
   void dispose() {
+    _chatController.removeListener(_handleComposerChanged);
     _chatController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  List<ChatMessage> _buildStarterMessages() {
-    return [
-      ChatMessage(
-        text:
-            "Hello, I'm UniGuide.\nAsk me anything from your syllabus and I will help you revise faster.",
-        isUser: false,
-        source: 'UniGuide',
-      ),
-    ];
+  void _handleComposerChanged() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   ChatSession _createFreshSession() {
     return ChatSession.create(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
-      messages: _buildStarterMessages(),
+      messages: const [],
     );
   }
 
@@ -170,6 +169,9 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
 
     final title = firstUserMessage?.text.trim() ?? '';
     if (title.isEmpty) {
+      if ((firstUserMessage?.imagePath ?? '').isNotEmpty) {
+        return 'Image discussion';
+      }
       return 'New chat';
     }
     if (title.length <= 42) {
@@ -202,12 +204,17 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
     if (_isInitializing || _isLoading) return;
 
     final userQuery = _chatController.text.trim();
-    if (userQuery.isEmpty) return;
+    final attachedImagePath = _attachedImagePath;
+    if (userQuery.isEmpty && attachedImagePath == null) return;
     final sessionId = _activeSession.id;
 
     final pendingMessages = [
       ..._messages,
-      ChatMessage(text: userQuery, isUser: true),
+      ChatMessage(
+        text: userQuery,
+        isUser: true,
+        imagePath: attachedImagePath,
+      ),
     ];
 
     setState(() {
@@ -219,11 +226,28 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
         ),
       );
       _chatController.clear();
+      _attachedImagePath = null;
       _isLoading = true;
     });
 
     await _persistChats();
     _scrollToBottom();
+
+    if (userQuery.isEmpty && attachedImagePath != null) {
+      await _saveMessagesForSession(sessionId, [
+        ...pendingMessages,
+        ChatMessage(
+          text: 'Image attached. Add a question or prompt so I can help with it.',
+          isUser: false,
+          source: 'UniGuide',
+        ),
+      ]);
+
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _scrollToBottom();
+      return;
+    }
 
     try {
       final response = await _apiService.getRAGResponse(userQuery);
@@ -271,6 +295,7 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
       _activeChatId = newSession.id;
       _selectedIndex = 0;
       _chatController.clear();
+      _attachedImagePath = null;
     });
     _persistChats();
   }
@@ -279,9 +304,32 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
     setState(() {
       _activeChatId = chatId;
       _selectedIndex = 0;
+      _attachedImagePath = null;
     });
     await _persistChats();
     _scrollToBottom();
+  }
+
+  Future<void> _pickImage() async {
+    if (_isLoading) return;
+
+    final image = await _imagePicker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 88,
+    );
+
+    if (!mounted || image == null) return;
+
+    setState(() {
+      _attachedImagePath = image.path;
+    });
+  }
+
+  void _removeAttachment() {
+    if (_attachedImagePath == null) return;
+    setState(() {
+      _attachedImagePath = null;
+    });
   }
 
   Future<void> _deleteChat(String chatId) async {
@@ -384,26 +432,75 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        title: Row(
           children: [
-            Text(_isLoggedIn ? _studentName : 'UniGuide'),
-            Text(
-              _selectedIndex == 0
-                  ? 'Study assistant for books, notes, and PYQs'
-                  : 'Browse academic resources quickly',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: const Color(0xFF64748B),
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [
+                    Color(0xFF163A66),
+                    Color(0xFF2C6CB2),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF2C6CB2).withValues(alpha: 0.18),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.auto_awesome_rounded,
+                color: Colors.white,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_isLoggedIn ? _studentName : 'UniGuide'),
+                  Text(
+                    _selectedIndex == 0
+                        ? 'Study assistant for books, notes, and PYQs'
+                        : 'Browse academic resources quickly',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF64748B),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: _toggleLogin,
-            child: Text(
-              _isLoggedIn ? 'Logout' : 'Login',
-              style: const TextStyle(color: Color(0xFF1B4D8C)),
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: const Color(0xFFD9E1EC)),
+            ),
+            child: TextButton.icon(
+              onPressed: _toggleLogin,
+              icon: Icon(
+                _isLoggedIn
+                    ? Icons.logout_rounded
+                    : Icons.login_rounded,
+                size: 16,
+                color: const Color(0xFF1B4D8C),
+              ),
+              label: Text(
+                _isLoggedIn ? 'Logout' : 'Login',
+                style: const TextStyle(color: Color(0xFF1B4D8C)),
+              ),
             ),
           ),
           IconButton(
@@ -424,6 +521,8 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
         ],
       ),
       drawer: isLargeScreen ? null : _buildDrawer(),
+      bottomNavigationBar:
+          isLargeScreen ? null : _buildMobileNavigation(theme),
       body: Row(
         children: [
           if (isLargeScreen) _buildSidebar(theme),
@@ -439,10 +538,17 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
 
   Widget _buildSidebar(ThemeData theme) {
     return Container(
-      width: 250,
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+      width: 278,
+      padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
       decoration: const BoxDecoration(
-        color: Color(0xFFEAF0F7),
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFFF2F7FC),
+            Color(0xFFE8F0F8),
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
         border: Border(
           right: BorderSide(color: Color(0xFFD4DEE9)),
         ),
@@ -450,26 +556,65 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Workspace',
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: const Color(0xFF526173),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [
+                  Color(0xFF163A66),
+                  Color(0xFF2C6CB2),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(26),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF163A66).withValues(alpha: 0.18),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'UniGuide',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: const Color(0xFF142033),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Search your syllabus, open resources, and continue studying from one place.',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF5D6B7D),
-              height: 1.45,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Workspace',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.82),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'UniGuide',
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Search your syllabus, open resources, and continue studying from one place.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.84),
+                    height: 1.45,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 20),
@@ -481,24 +626,69 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
                 final item = _navItems[index];
                 final selected = index == _selectedIndex;
 
-                return ListTile(
-                  selected: selected,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  selectedTileColor: Colors.white,
-                  leading: Icon(
-                    selected ? item.selectedIcon : item.icon,
-                    color: const Color(0xFF1B4D8C),
-                  ),
-                  title: Text(
-                    item.label,
-                    style: TextStyle(
-                      fontWeight:
-                          selected ? FontWeight.w700 : FontWeight.w500,
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  decoration: BoxDecoration(
+                    color: selected ? Colors.white : Colors.transparent,
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: selected
+                          ? const Color(0xFFDCE7F5)
+                          : Colors.transparent,
                     ),
+                    boxShadow: selected
+                        ? [
+                            BoxShadow(
+                              color: const Color(0xFF1B4D8C)
+                                  .withValues(alpha: 0.08),
+                              blurRadius: 16,
+                              offset: const Offset(0, 8),
+                            ),
+                          ]
+                        : null,
                   ),
-                  onTap: () => setState(() => _selectedIndex = index),
+                  child: ListTile(
+                    selected: selected,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 4,
+                    ),
+                    leading: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? const Color(0xFFE7F0FB)
+                            : const Color(0xFFF3F6FA),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(
+                        selected ? item.selectedIcon : item.icon,
+                        color: const Color(0xFF1B4D8C),
+                        size: 20,
+                      ),
+                    ),
+                    title: Text(
+                      item.label,
+                      style: TextStyle(
+                        fontWeight:
+                            selected ? FontWeight.w700 : FontWeight.w600,
+                        color: const Color(0xFF162132),
+                      ),
+                    ),
+                    trailing: selected
+                        ? const Icon(
+                            Icons.arrow_forward_ios_rounded,
+                            size: 14,
+                            color: Color(0xFF1B4D8C),
+                          )
+                        : null,
+                    onTap: () => setState(() => _selectedIndex = index),
+                  ),
                 );
               },
             ),
@@ -551,7 +741,12 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
 
   Widget _buildChatUI() {
     final theme = Theme.of(context);
-    final showSuggestions = !_messages.any((message) => message.isUser);
+    final isComposing = _chatController.text.trim().isNotEmpty;
+    final isEmptyConversation = _messages.isEmpty;
+    final showWelcomePanel = isEmptyConversation && !isComposing;
+    final showSuggestions = isEmptyConversation && !isComposing;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final horizontalPadding = screenWidth < 640 ? 16.0 : 20.0;
 
     return Container(
       decoration: const BoxDecoration(
@@ -564,72 +759,267 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
           end: Alignment.bottomCenter,
         ),
       ),
-      child: Column(
+      child: Stack(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(
+          Positioned(
+            top: -90,
+            right: -60,
+            child: _buildAmbientGlow(
+              size: 220,
+              colors: const [Color(0x552C6CB2), Color(0x1188B8F2)],
+            ),
+          ),
+          Positioned(
+            left: -70,
+            top: 180,
+            child: _buildAmbientGlow(
+              size: 180,
+              colors: const [Color(0x33A7D6FF), Color(0x00A7D6FF)],
+            ),
+          ),
+          Positioned(
+            right: -50,
+            bottom: 120,
+            child: _buildAmbientGlow(
+              size: 160,
+              colors: const [Color(0x22FFD280), Color(0x00FFD280)],
+            ),
+          ),
+          Column(
+            children: [
+              Expanded(
+                child: Stack(
                   children: [
-                    Container(
-                      width: 52,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1B4D8C),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: const Icon(
-                        Icons.auto_awesome,
-                        color: Colors.white,
-                      ),
+                    ChatMessageList(
+                      messages: _messages,
+                      isLoading: _isLoading,
+                      scrollController: _scrollController,
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _activeSession.title,
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: const Color(0xFF162132),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Continue this chat, start a new one, or reopen an older conversation from History.',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: const Color(0xFF5D6B7D),
-                            ),
-                          ),
-                        ],
-                      ),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      switchInCurve: Curves.easeOut,
+                      switchOutCurve: Curves.easeIn,
+                      child: showWelcomePanel
+                          ? IgnorePointer(
+                              ignoring: false,
+                              key: const ValueKey('welcome-panel'),
+                              child: SingleChildScrollView(
+                                padding: EdgeInsets.fromLTRB(
+                                  horizontalPadding,
+                                  20,
+                                  horizontalPadding,
+                                  20,
+                                ),
+                                child: _buildWelcomePanel(theme),
+                              ),
+                            )
+                          : const SizedBox.shrink(key: ValueKey('no-welcome')),
                     ),
                   ],
                 ),
               ),
+              ChatInputField(
+                controller: _chatController,
+                onSend: _handleSend,
+                isLoading: _isLoading,
+                showSuggestions: showSuggestions,
+                attachedImagePath: _attachedImagePath,
+                onAttachImage: _pickImage,
+                onRemoveAttachment: _removeAttachment,
+                onSuggestionTap: (suggestion) {
+                  _chatController.value = TextEditingValue(
+                    text: suggestion,
+                    selection: TextSelection.collapsed(offset: suggestion.length),
+                  );
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAmbientGlow({
+    required double size,
+    required List<Color> colors,
+  }) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(colors: colors),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWelcomePanel(ThemeData theme) {
+    final width = MediaQuery.of(context).size.width;
+    final panelMaxWidth = width < 700 ? width : 620.0;
+    final panelPadding = width < 600 ? 10.0 : 18.0;
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: panelMaxWidth),
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: panelPadding),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 18),
+                child: _buildWelcomeAnimation(theme),
+              ),
+              Text(
+                'Hello, UniGuide',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF142033),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Ask anything from your syllabus and I will help you revise faster.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: const Color(0xFF506073),
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Start typing below to begin a new chat.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFF6A7788),
+                  height: 1.45,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWelcomeAnimation(ThemeData theme) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.92, end: 1),
+      duration: const Duration(milliseconds: 1800),
+      curve: Curves.easeInOut,
+      builder: (context, value, child) {
+        return Transform.scale(
+          scale: value,
+          child: Container(
+            width: 210,
+            height: 210,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const RadialGradient(
+                colors: [
+                  Color(0x66D9ECFF),
+                  Color(0x22A7D6FF),
+                  Color(0x00A7D6FF),
+                ],
+              ),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Transform.rotate(
+                  angle: value * 0.25,
+                  child: Container(
+                    width: 168,
+                    height: 168,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0x552C6CB2),
+                        width: 1.4,
+                      ),
+                    ),
+                  ),
+                ),
+                Transform.rotate(
+                  angle: -value * 0.18,
+                  child: Container(
+                    width: 130,
+                    height: 130,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0x4488B8F2),
+                        width: 1.2,
+                      ),
+                    ),
+                  ),
+                ),
+                Container(
+                  width: 92,
+                  height: 92,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [
+                        Color(0xFF163A66),
+                        Color(0xFF2C6CB2),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF2C6CB2).withValues(alpha: 0.28),
+                        blurRadius: 24,
+                        offset: const Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Colors.white,
+                    size: 40,
+                  ),
+                ),
+                Positioned(
+                  top: 32,
+                  right: 34,
+                  child: _buildSparkDot(const Color(0xFFFFD166), 16),
+                ),
+                Positioned(
+                  left: 28,
+                  bottom: 42,
+                  child: _buildSparkDot(const Color(0xFF88B8F2), 12),
+                ),
+                Positioned(
+                  right: 48,
+                  bottom: 28,
+                  child: _buildSparkDot(const Color(0xFF7EE081), 10),
+                ),
+              ],
             ),
           ),
-          Expanded(
-            child: ChatMessageList(
-              messages: _messages,
-              isLoading: _isLoading,
-              scrollController: _scrollController,
-            ),
-          ),
-          ChatInputField(
-            controller: _chatController,
-            onSend: _handleSend,
-            isLoading: _isLoading,
-            showSuggestions: showSuggestions,
-            onSuggestionTap: (suggestion) {
-              _chatController.value = TextEditingValue(
-                text: suggestion,
-                selection: TextSelection.collapsed(offset: suggestion.length),
-              );
-            },
+        );
+      },
+    );
+  }
+
+  Widget _buildSparkDot(Color color, double size) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.35),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -749,6 +1139,37 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
         setState(() => _selectedIndex = index);
         Navigator.pop(context);
       },
+    );
+  }
+
+  Widget _buildMobileNavigation(ThemeData theme) {
+    return NavigationBar(
+      height: 78,
+      elevation: 0,
+      backgroundColor: Colors.white.withValues(alpha: 0.98),
+      indicatorColor: const Color(0xFFE7F0FB),
+      selectedIndex: _selectedIndex,
+      onDestinationSelected: (index) {
+        setState(() => _selectedIndex = index);
+      },
+      destinations: _navItems.map((item) {
+        final index = _navItems.indexOf(item);
+        final selected = index == _selectedIndex;
+        return NavigationDestination(
+          icon: Icon(item.icon, color: const Color(0xFF617083)),
+          selectedIcon: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: const Color(0xFFDCEBFB),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(item.selectedIcon, color: const Color(0xFF1B4D8C)),
+          ),
+          label: item.label,
+          tooltip: selected ? '${item.label} selected' : item.label,
+        );
+      }).toList(),
     );
   }
 }

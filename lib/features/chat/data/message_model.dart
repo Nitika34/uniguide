@@ -3,12 +3,14 @@ class ChatMessage {
   final bool isUser;
   final DateTime timestamp;
   final String? source;
+  final String? imagePath;
 
   ChatMessage({
     required this.text,
     required this.isUser,
     DateTime? timestamp,
     this.source,
+    this.imagePath,
   }) : timestamp = timestamp ?? DateTime.now();
 
   Map<String, dynamic> toJson() {
@@ -17,6 +19,7 @@ class ChatMessage {
       'isUser': isUser,
       'timestamp': timestamp.toIso8601String(),
       'source': source,
+      'imagePath': imagePath,
     };
   }
 
@@ -27,6 +30,7 @@ class ChatMessage {
       timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
           DateTime.now(),
       source: json['source'] as String?,
+      imagePath: json['imagePath'] as String?,
     );
   }
 }
@@ -62,7 +66,10 @@ class ChatSession {
 
   String get previewText {
     if (messages.isEmpty) return 'No messages yet';
-    return messages.last.text.replaceAll('\n', ' ').trim();
+    final preview = messages.last.text.replaceAll('\n', ' ').trim();
+    if (preview.isNotEmpty) return preview;
+    if ((messages.last.imagePath ?? '').isNotEmpty) return 'Image attachment';
+    return 'No messages yet';
   }
 
   ChatSession copyWith({
