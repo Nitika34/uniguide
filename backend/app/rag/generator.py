@@ -1,6 +1,7 @@
 from groq import Groq
 import os
 import re
+import json
 
 
 class Generator:
@@ -77,6 +78,112 @@ Write a detailed exam answer:
 3. Example
 4. Key points summary
 """
+
+    def should_generate_diagram(self, question, answer):
+        normalized_question = question.lower()
+        diagram_keywords = (
+            "diagram",
+            "flowchart",
+            "architecture",
+            "workflow",
+            "process",
+            "steps",
+            "working",
+            "lifecycle",
+            "how",
+            "explain",
+        )
+
+        if any(keyword in normalized_question for keyword in diagram_keywords):
+            return True
+
+        return len(answer.split()) >= 60
+
+    def generate_diagram(self, question, retrieved_chunks, answer):
+        if not retrieved_chunks or not answer:
+            return None
+
+        if not self.should_generate_diagram(question, answer):
+            return None
+
+        context = self.build_context(retrieved_chunks)
+        prompt = f"""
+Create a compact study diagram in strict JSON.
+
+Return only valid JSON with this exact schema:
+{{
+  "title": "Short diagram title",
+  "steps": [
+    {{"title": "Step title", "detail": "One short explanation"}},
+    {{"title": "Step title", "detail": "One short explanation"}}
+  ],
+  "footer": "Optional short takeaway"
+}}
+
+Rules:
+- Use 3 to 5 steps only.
+- Keep each title under 6 words.
+- Keep each detail under 18 words.
+- The diagram must help explain the answer visually.
+- Do not include markdown fences or extra commentary.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:
+{answer}
+"""
+
+        try:
+            completion = self.client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": "You turn study answers into compact educational diagrams."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+            )
+
+            content = completion.choices[0].message.content.strip()
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if not match:
+                return None
+
+            parsed = json.loads(match.group(0))
+            title = str(parsed.get("title", "")).strip()
+            footer = str(parsed.get("footer", "")).strip() or None
+            raw_steps = parsed.get("steps", [])
+
+            if not title or not isinstance(raw_steps, list):
+                return None
+
+            steps = []
+            for step in raw_steps[:5]:
+                if not isinstance(step, dict):
+                    continue
+                step_title = str(step.get("title", "")).strip()
+                step_detail = str(step.get("detail", "")).strip()
+                if not step_title:
+                    continue
+                steps.append({
+                    "title": step_title,
+                    "detail": step_detail,
+                })
+
+            if len(steps) < 3:
+                return None
+
+            return {
+                "title": title,
+                "steps": steps,
+                "footer": footer,
+            }
+        except Exception as e:
+            print(f"[Generator] Diagram generation skipped: {e}")
+            return None
 
     # -----------------------------
     # NORMAL RESPONSE

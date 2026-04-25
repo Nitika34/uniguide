@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -10,9 +8,6 @@ class ChatInputField extends StatelessWidget {
     required this.onSend,
     required this.isLoading,
     required this.showSuggestions,
-    this.attachedImagePath,
-    this.onAttachImage,
-    this.onRemoveAttachment,
     this.onSuggestionTap,
   });
 
@@ -20,9 +15,6 @@ class ChatInputField extends StatelessWidget {
   final VoidCallback onSend;
   final bool isLoading;
   final bool showSuggestions;
-  final String? attachedImagePath;
-  final Future<void> Function()? onAttachImage;
-  final VoidCallback? onRemoveAttachment;
   final ValueChanged<String>? onSuggestionTap;
 
   KeyEventResult _handleKeyPress(KeyEvent event) {
@@ -67,7 +59,6 @@ class ChatInputField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final width = MediaQuery.of(context).size.width;
     final isPhoneWidth = width < 520;
     final inputRadius = isPhoneWidth ? 22.0 : 28.0;
@@ -89,64 +80,6 @@ class ChatInputField extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (attachedImagePath != null) ...[
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [
-                        Color(0xFFF6FAFF),
-                        Color(0xFFEAF4FF),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(color: const Color(0xFFD5E4F4)),
-                  ),
-                  child: Row(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: Image.file(
-                          File(attachedImagePath!),
-                          width: isPhoneWidth ? 56 : 72,
-                          height: isPhoneWidth ? 56 : 72,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Image attached',
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                color: const Color(0xFF163A66),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Send it with a question or keep it ready as a diagram reference.',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: const Color(0xFF5D6B7D),
-                                height: 1.35,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Remove attachment',
-                        onPressed: isLoading ? null : onRemoveAttachment,
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 220),
                 child: showSuggestions
@@ -193,16 +126,6 @@ class ChatInputField extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      IconButton(
-                        tooltip: 'Attach image',
-                        onPressed: isLoading || onAttachImage == null
-                            ? null
-                            : () => onAttachImage!(),
-                        icon: Icon(
-                          Icons.add_photo_alternate_outlined,
-                          size: toolbarIconSize,
-                        ),
-                      ),
                       IconButton(
                         tooltip: 'Paste',
                         onPressed:

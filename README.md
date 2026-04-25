@@ -130,3 +130,10 @@ Endpoint	Description
 
 Contributions are welcome!
 Feel free to fork this repository and submit a pull request.
+
+Connection notes:
+- Desktop app uses http://127.0.0.1:5000
+- Android emulator uses http://10.0.2.2:5000
+- Real Android phone must use your PC IP, for example:
+  flutter run --dart-define=API_HOST=192.168.1.5:5000
+- Test backend first with /health on port 5000

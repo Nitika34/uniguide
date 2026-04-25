@@ -78,14 +78,17 @@ def chat():
     if intent == "important_topics":
         answer = "The 'Important Topics' feature is currently being calibrated for your syllabus."
         sources = []
+        diagram = None
     else:
         result = rag_service.ask(question)
         answer = result.get("answer", "I couldn't find a specific answer in the documents.")
         sources = result.get("sources", [])
+        diagram = result.get("diagram")
 
     return jsonify({
         "answer": answer,
         "sources": sources,
+        "diagram": diagram,
         "intent": intent,
         "student_branch": None
     })

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../features/chat/data/api_service.dart';
 import '../features/chat/data/chat_storage_service.dart';
@@ -30,11 +29,9 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
   final ChatStorageService _chatStorageService = ChatStorageService();
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final ImagePicker _imagePicker = ImagePicker();
 
   List<ChatSession> _chatSessions = [];
   String? _activeChatId;
-  String? _attachedImagePath;
 
   static const List<_NavItem> _navItems = [
     _NavItem(
@@ -169,9 +166,6 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
 
     final title = firstUserMessage?.text.trim() ?? '';
     if (title.isEmpty) {
-      if ((firstUserMessage?.imagePath ?? '').isNotEmpty) {
-        return 'Image discussion';
-      }
       return 'New chat';
     }
     if (title.length <= 42) {
@@ -204,8 +198,7 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
     if (_isInitializing || _isLoading) return;
 
     final userQuery = _chatController.text.trim();
-    final attachedImagePath = _attachedImagePath;
-    if (userQuery.isEmpty && attachedImagePath == null) return;
+    if (userQuery.isEmpty) return;
     final sessionId = _activeSession.id;
 
     final pendingMessages = [
@@ -213,7 +206,6 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
       ChatMessage(
         text: userQuery,
         isUser: true,
-        imagePath: attachedImagePath,
       ),
     ];
 
@@ -226,45 +218,30 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
         ),
       );
       _chatController.clear();
-      _attachedImagePath = null;
       _isLoading = true;
     });
 
     await _persistChats();
     _scrollToBottom();
 
-    if (userQuery.isEmpty && attachedImagePath != null) {
-      await _saveMessagesForSession(sessionId, [
-        ...pendingMessages,
-        ChatMessage(
-          text: 'Image attached. Add a question or prompt so I can help with it.',
-          isUser: false,
-          source: 'UniGuide',
-        ),
-      ]);
-
-      if (!mounted) return;
-      setState(() => _isLoading = false);
-      _scrollToBottom();
-      return;
-    }
-
     try {
       final response = await _apiService.getRAGResponse(userQuery);
       await _saveMessagesForSession(sessionId, [
         ...pendingMessages,
         ChatMessage(
-          text: response,
+          text: response.answer,
           isUser: false,
-          source: 'UniGuide',
+          source: response.sources.isEmpty
+              ? 'UniGuide'
+              : 'UniGuide - ${response.sources.first}',
+          diagram: response.diagram?.hasContent ?? false ? response.diagram : null,
         ),
       ]);
-    } catch (_) {
+    } catch (error) {
       await _saveMessagesForSession(sessionId, [
         ...pendingMessages,
         ChatMessage(
-          text:
-              "I couldn't reach the backend. Please make sure the Flask server is running on port 5000.",
+          text: error.toString().replaceFirst('Exception: ', ''),
           isUser: false,
           source: 'System',
         ),
@@ -295,7 +272,6 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
       _activeChatId = newSession.id;
       _selectedIndex = 0;
       _chatController.clear();
-      _attachedImagePath = null;
     });
     _persistChats();
   }
@@ -304,32 +280,9 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
     setState(() {
       _activeChatId = chatId;
       _selectedIndex = 0;
-      _attachedImagePath = null;
     });
     await _persistChats();
     _scrollToBottom();
-  }
-
-  Future<void> _pickImage() async {
-    if (_isLoading) return;
-
-    final image = await _imagePicker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 88,
-    );
-
-    if (!mounted || image == null) return;
-
-    setState(() {
-      _attachedImagePath = image.path;
-    });
-  }
-
-  void _removeAttachment() {
-    if (_attachedImagePath == null) return;
-    setState(() {
-      _attachedImagePath = null;
-    });
   }
 
   Future<void> _deleteChat(String chatId) async {
@@ -823,9 +776,6 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
                 onSend: _handleSend,
                 isLoading: _isLoading,
                 showSuggestions: showSuggestions,
-                attachedImagePath: _attachedImagePath,
-                onAttachImage: _pickImage,
-                onRemoveAttachment: _removeAttachment,
                 onSuggestionTap: (suggestion) {
                   _chatController.value = TextEditingValue(
                     text: suggestion,

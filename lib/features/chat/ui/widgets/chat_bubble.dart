@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../data/message_model.dart';
+import 'chat_diagram_card.dart';
 
 class ChatBubble extends StatelessWidget {
   const ChatBubble({
@@ -95,31 +94,8 @@ class ChatBubble extends StatelessWidget {
                         ),
                       ),
                     ),
-                  if (message.imagePath != null) ...[
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
-                      child: Image.file(
-                        File(message.imagePath!),
-                        width: 240,
-                        height: 180,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) {
-                          return Container(
-                            width: 240,
-                            height: 180,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFE7F0FB),
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            alignment: Alignment.center,
-                            child: const Icon(
-                              Icons.image_not_supported_outlined,
-                              color: Color(0xFF5E6B7D),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
+                  if (!isUser && (message.diagram?.hasContent ?? false)) ...[
+                    ChatDiagramCard(diagram: message.diagram!),
                     if (message.text.trim().isNotEmpty) const SizedBox(height: 12),
                   ],
                   if (message.text.trim().isNotEmpty)
