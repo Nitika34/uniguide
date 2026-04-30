@@ -15,7 +15,8 @@ class AdaptiveScaffold extends StatefulWidget {
   State<AdaptiveScaffold> createState() => _AdaptiveScaffoldState();
 }
 
-class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
+class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
+    with WidgetsBindingObserver {
   int _selectedIndex = 0;
 
   bool _isLoggedIn = false;
@@ -64,12 +65,14 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _chatController.addListener(_handleComposerChanged);
     _loadChats();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _chatController.removeListener(_handleComposerChanged);
     _chatController.dispose();
     _scrollController.dispose();
@@ -86,6 +89,19 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       messages: const [],
     );
+  }
+
+  bool _isDraftSession(ChatSession session) => session.messages.isEmpty;
+
+  ChatSession _ensureDraftSession(List<ChatSession> sessions) {
+    for (final session in sessions) {
+      if (_isDraftSession(session)) {
+        return session;
+      }
+    }
+    final draftSession = _createFreshSession();
+    sessions.insert(0, draftSession);
+    return draftSession;
   }
 
   ChatSession get _activeSession {
@@ -119,7 +135,6 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
 
   Future<void> _loadChats() async {
     final sessions = await _chatStorageService.loadSessions();
-    final activeChatId = await _chatStorageService.loadActiveChatId();
 
     if (!mounted) return;
 
@@ -131,14 +146,46 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
       } else {
         _chatSessions = List<ChatSession>.from(sessions)
           ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-        _activeChatId = _chatSessions.any((session) => session.id == activeChatId)
-            ? activeChatId
-            : _chatSessions.first.id;
+        final landingSession = _ensureDraftSession(_chatSessions);
+        _chatSessions
+          ..removeWhere((session) => session.id == landingSession.id)
+          ..insert(0, landingSession);
+        _activeChatId = landingSession.id;
       }
       _isInitializing = false;
     });
 
     await _persistChats();
+  }
+
+  Future<void> _prepareFreshChatLanding() async {
+    if (_isInitializing) return;
+
+    final draftSession = _ensureDraftSession(_chatSessions);
+
+    if (!mounted) {
+      _activeChatId = draftSession.id;
+      return _persistChats();
+    }
+
+    setState(() {
+      _chatSessions
+        ..removeWhere((session) => session.id == draftSession.id)
+        ..insert(0, draftSession);
+      _activeChatId = draftSession.id;
+      _chatController.clear();
+      _isLoading = false;
+    });
+
+    await _persistChats();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _prepareFreshChatLanding();
+    }
   }
 
   Future<void> _persistChats() {
@@ -383,8 +430,13 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
     final isLargeScreen = MediaQuery.of(context).size.width > 760;
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
+    return WillPopScope(
+      onWillPop: () async {
+        await _prepareFreshChatLanding();
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
         title: Row(
           children: [
             Container(
@@ -473,18 +525,19 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
           ),
         ],
       ),
-      drawer: isLargeScreen ? null : _buildDrawer(),
-      bottomNavigationBar:
-          isLargeScreen ? null : _buildMobileNavigation(theme),
-      body: Row(
-        children: [
-          if (isLargeScreen) _buildSidebar(theme),
-          Expanded(
-            child: _isInitializing
-                ? const Center(child: CircularProgressIndicator())
-                : _buildMainContent(),
-          ),
-        ],
+        drawer: isLargeScreen ? null : _buildDrawer(),
+        bottomNavigationBar:
+            isLargeScreen ? null : _buildMobileNavigation(theme),
+        body: Row(
+          children: [
+            if (isLargeScreen) _buildSidebar(theme),
+            Expanded(
+              child: _isInitializing
+                  ? const Center(child: CircularProgressIndicator())
+                  : _buildMainContent(),
+            ),
+          ],
+        ),
       ),
     );
   }
