@@ -218,11 +218,17 @@ Rules:
 - If the context does not contain the answer, say you are not sure.
 
 Answer format:
-Write the answer clearly for exam preparation.
+Write the answer in clean Markdown-style formatting:
+- Start with a short heading using ##.
+- Use short paragraphs.
+- Use bullet points for key facts.
+- Use numbered steps when explaining a process.
+- Use subheadings for sections like Definition, Explanation, Example, Key Points, or Sources.
+- Keep lines easy to scan on a phone screen.
 
 After the answer include:
 
-Sources:
+## Sources
 - <Book or PYQ name>
 """
 
@@ -275,9 +281,17 @@ Rules:
 - Do not invent information.
 - If the context does not contain the answer, say you are not sure.
 
+Answer format:
+- Start with a short heading using ##.
+- Use short paragraphs.
+- Use bullet points for key facts.
+- Use numbered steps when explaining a process.
+- Use subheadings for sections like Definition, Explanation, Example, Key Points, or Sources.
+- Keep lines easy to scan on a phone screen.
+
 After the answer include:
 
-Sources:
+## Sources
 - <Book or PYQ name>
 """
 

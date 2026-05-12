@@ -750,7 +750,6 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
     final isComposing = _chatController.text.trim().isNotEmpty;
     final isEmptyConversation = _messages.isEmpty;
     final showWelcomePanel = isEmptyConversation && !isComposing;
-    final showSuggestions = isEmptyConversation && !isComposing;
     final screenWidth = MediaQuery.of(context).size.width;
     final horizontalPadding = screenWidth < 640 ? 16.0 : 20.0;
 
@@ -828,13 +827,6 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
                 controller: _chatController,
                 onSend: _handleSend,
                 isLoading: _isLoading,
-                showSuggestions: showSuggestions,
-                onSuggestionTap: (suggestion) {
-                  _chatController.value = TextEditingValue(
-                    text: suggestion,
-                    selection: TextSelection.collapsed(offset: suggestion.length),
-                  );
-                },
               ),
             ],
           ),

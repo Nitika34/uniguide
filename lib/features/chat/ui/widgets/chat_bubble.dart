@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../data/message_model.dart';
 import 'chat_diagram_card.dart';
+import 'formatted_answer_text.dart';
 
 class ChatBubble extends StatelessWidget {
   const ChatBubble({
@@ -99,14 +100,16 @@ class ChatBubble extends StatelessWidget {
                     if (message.text.trim().isNotEmpty) const SizedBox(height: 12),
                   ],
                   if (message.text.trim().isNotEmpty)
-                    SelectableText(
-                      message.text,
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        color: textColor,
-                        height: 1.5,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                    isUser
+                        ? SelectableText(
+                            message.text,
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              color: textColor,
+                              height: 1.5,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          )
+                        : FormattedAnswerText(text: message.text),
                   const SizedBox(height: 10),
                   Row(
                     mainAxisSize: MainAxisSize.min,

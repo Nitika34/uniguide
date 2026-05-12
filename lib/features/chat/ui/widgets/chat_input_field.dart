@@ -7,15 +7,11 @@ class ChatInputField extends StatelessWidget {
     required this.controller,
     required this.onSend,
     required this.isLoading,
-    required this.showSuggestions,
-    this.onSuggestionTap,
   });
 
   final TextEditingController controller;
   final VoidCallback onSend;
   final bool isLoading;
-  final bool showSuggestions;
-  final ValueChanged<String>? onSuggestionTap;
 
   KeyEventResult _handleKeyPress(KeyEvent event) {
     if (event is! KeyDownEvent) {
@@ -30,12 +26,6 @@ class ChatInputField extends StatelessWidget {
 
     return KeyEventResult.ignored;
   }
-
-  static const List<String> _suggestions = [
-    'Summarize this topic for me',
-    'Give me important exam questions',
-    'Explain in simple language',
-  ];
 
   Future<void> _pasteFromClipboard(BuildContext context) async {
     final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
@@ -80,33 +70,6 @@ class ChatInputField extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                child: showSuggestions
-                    ? Column(
-                        key: const ValueKey('suggestions'),
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: _suggestions.map((suggestion) {
-                              return ActionChip(
-                                label: Text(suggestion),
-                                backgroundColor: const Color(0xFFF2F6FB),
-                                side:
-                                    const BorderSide(color: Color(0xFFD7E2F0)),
-                                onPressed: onSuggestionTap == null
-                                    ? null
-                                    : () => onSuggestionTap!(suggestion),
-                              );
-                            }).toList(),
-                          ),
-                          const SizedBox(height: 12),
-                        ],
-                      )
-                    : const SizedBox.shrink(key: ValueKey('no-suggestions')),
-              ),
               Container(
                 decoration: BoxDecoration(
                   color: const Color(0xFFF6F8FB),
