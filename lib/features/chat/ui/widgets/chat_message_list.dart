@@ -10,11 +10,13 @@ class ChatMessageList extends StatelessWidget {
     required this.messages,
     required this.isLoading,
     required this.scrollController,
+    this.onEditUserMessage,
   });
 
   final List<ChatMessage> messages;
   final bool isLoading;
   final ScrollController scrollController;
+  final ValueChanged<int>? onEditUserMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +47,10 @@ class ChatMessageList extends StatelessWidget {
         final msg = messages[index];
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: ChatBubble(message: msg),
+          child: ChatBubble(
+            message: msg,
+            onEdit: msg.isUser ? () => onEditUserMessage?.call(index) : null,
+          ),
         );
       },
     );

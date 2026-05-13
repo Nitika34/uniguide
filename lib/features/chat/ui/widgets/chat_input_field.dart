@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-class ChatInputField extends StatelessWidget {
+class ChatInputField extends StatefulWidget {
   const ChatInputField({
     super.key,
     required this.controller,
@@ -13,6 +13,13 @@ class ChatInputField extends StatelessWidget {
   final VoidCallback onSend;
   final bool isLoading;
 
+  @override
+  State<ChatInputField> createState() => _ChatInputFieldState();
+}
+
+class _ChatInputFieldState extends State<ChatInputField> {
+  bool showHint = true;
+
   KeyEventResult _handleKeyPress(KeyEvent event) {
     if (event is! KeyDownEvent) {
       return KeyEventResult.ignored;
@@ -20,11 +27,19 @@ class ChatInputField extends StatelessWidget {
 
     if (event.logicalKey == LogicalKeyboardKey.enter &&
         !HardwareKeyboard.instance.isShiftPressed) {
-      onSend();
+      _sendMessage();
       return KeyEventResult.handled;
     }
 
     return KeyEventResult.ignored;
+  }
+
+  void _sendMessage() {
+    setState(() {
+      showHint = false;
+    });
+
+    widget.onSend();
   }
 
   Future<void> _pasteFromClipboard(BuildContext context) async {
@@ -33,24 +48,32 @@ class ChatInputField extends StatelessWidget {
 
     if (pastedText == null || pastedText.isEmpty) {
       if (!context.mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Clipboard is empty')),
+        const SnackBar(
+          content: Text('Clipboard is empty'),
+        ),
       );
       return;
     }
 
     final updatedText =
-        '${controller.text}${controller.text.isEmpty ? '' : '\n'}$pastedText';
-    controller.value = TextEditingValue(
+        '${widget.controller.text}${widget.controller.text.isEmpty ? '' : '\n'}$pastedText';
+
+    widget.controller.value = TextEditingValue(
       text: updatedText,
-      selection: TextSelection.collapsed(offset: updatedText.length),
+      selection: TextSelection.collapsed(
+        offset: updatedText.length,
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
+
     final isPhoneWidth = width < 520;
+
     final inputRadius = isPhoneWidth ? 22.0 : 28.0;
     final sendButtonSize = isPhoneWidth ? 44.0 : 52.0;
     final toolbarIconSize = isPhoneWidth ? 20.0 : 24.0;
@@ -59,7 +82,9 @@ class ChatInputField extends StatelessWidget {
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(
-          top: BorderSide(color: Color(0xFFDCE3ED)),
+          top: BorderSide(
+            color: Color(0xFFDCE3ED),
+          ),
         ),
       ),
       child: SafeArea(
@@ -74,7 +99,9 @@ class ChatInputField extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: const Color(0xFFF6F8FB),
                   borderRadius: BorderRadius.circular(inputRadius),
-                  border: Border.all(color: const Color(0xFFD7E2F0)),
+                  border: Border.all(
+                    color: const Color(0xFFD7E2F0),
+                  ),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.04),
@@ -84,62 +111,92 @@ class ChatInputField extends StatelessWidget {
                   ],
                 ),
                 child: GestureDetector(
-                  onLongPress:
-                      isLoading ? null : () => _pasteFromClipboard(context),
+                  onLongPress: widget.isLoading
+                      ? null
+                      : () => _pasteFromClipboard(context),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       IconButton(
                         tooltip: 'Paste',
-                        onPressed:
-                            isLoading ? null : () => _pasteFromClipboard(context),
+                        onPressed: widget.isLoading
+                            ? null
+                            : () => _pasteFromClipboard(context),
                         icon: Icon(
                           Icons.content_paste_rounded,
                           size: toolbarIconSize,
                         ),
                       ),
+
                       Expanded(
                         child: Focus(
-                          onKeyEvent: (_, event) => _handleKeyPress(event),
+                          onKeyEvent: (_, event) =>
+                              _handleKeyPress(event),
                           child: TextField(
-                            controller: controller,
+                            controller: widget.controller,
                             minLines: 1,
                             maxLines: isPhoneWidth ? 4 : 6,
                             keyboardType: TextInputType.multiline,
-                            textInputAction: TextInputAction.newline,
-                            textCapitalization: TextCapitalization.sentences,
-                            decoration: const InputDecoration(
-                              hintText:
-                                  'Ask UniGuide anything from your syllabus',
+                            textInputAction:
+                                TextInputAction.newline,
+                            textCapitalization:
+                                TextCapitalization.sentences,
+
+                            decoration: InputDecoration(
+                              hintText: showHint
+                                  ? 'Ask UniGuide anything from your syllabus.'
+                                  : null,
+
                               border: InputBorder.none,
+
                               contentPadding:
-                                  EdgeInsets.symmetric(vertical: 12),
+                                  const EdgeInsets.symmetric(
+                                vertical: 12,
+                              ),
                             ),
                           ),
                         ),
                       ),
+
                       Padding(
-                        padding: const EdgeInsets.only(right: 8, bottom: 6),
+                        padding: const EdgeInsets.only(
+                          right: 8,
+                          bottom: 6,
+                        ),
                         child: FilledButton(
-                          onPressed: isLoading ? null : onSend,
+                          onPressed: widget.isLoading
+                              ? null
+                              : _sendMessage,
+
                           style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF1B4D8C),
+                            backgroundColor:
+                                const Color(0xFF1B4D8C),
+
                             foregroundColor: Colors.white,
-                            minimumSize:
-                                Size(sendButtonSize, sendButtonSize),
+
+                            minimumSize: Size(
+                              sendButtonSize,
+                              sendButtonSize,
+                            ),
+
                             padding: EdgeInsets.zero,
+
                             shape: const CircleBorder(),
                           ),
-                          child: isLoading
+
+                          child: widget.isLoading
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(
+                                  child:
+                                      CircularProgressIndicator(
                                     strokeWidth: 2,
                                     color: Colors.white,
                                   ),
                                 )
-                              : const Icon(Icons.arrow_upward_rounded),
+                              : const Icon(
+                                  Icons.arrow_upward_rounded,
+                                ),
                         ),
                       ),
                     ],

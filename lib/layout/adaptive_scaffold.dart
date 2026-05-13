@@ -24,6 +24,7 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
   bool _isInitializing = true;
 
   String _studentName = 'Guest';
+  ChatUser _currentUser = const ChatUser.guest();
   final String _appVersion = 'v1.1.0';
 
   final ApiService _apiService = ApiService();
@@ -134,11 +135,20 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
   }
 
   Future<void> _loadChats() async {
-    final sessions = await _chatStorageService.loadSessions();
+    final currentUser = await _chatStorageService.loadCurrentUser();
+    final sessions = await _chatStorageService.loadSessions(
+      userId: currentUser.id,
+    );
+    final activeChatId = await _chatStorageService.loadActiveChatId(
+      userId: currentUser.id,
+    );
 
     if (!mounted) return;
 
     setState(() {
+      _currentUser = currentUser;
+      _isLoggedIn = !currentUser.isGuest;
+      _studentName = currentUser.name;
       if (sessions.isEmpty) {
         final initialSession = _createFreshSession();
         _chatSessions = [initialSession];
@@ -150,7 +160,10 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
         _chatSessions
           ..removeWhere((session) => session.id == landingSession.id)
           ..insert(0, landingSession);
-        _activeChatId = landingSession.id;
+        _activeChatId =
+            _chatSessions.any((session) => session.id == activeChatId)
+                ? activeChatId
+                : landingSession.id;
       }
       _isInitializing = false;
     });
@@ -192,12 +205,14 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
     return _chatStorageService.saveSessions(
       sessions: _chatSessions,
       activeChatId: _activeChatId,
+      userId: _currentUser.id,
     );
   }
 
   void _replaceSession(ChatSession updatedSession) {
     _chatSessions = _chatSessions
-        .map((session) => session.id == updatedSession.id ? updatedSession : session)
+        .map((session) =>
+            session.id == updatedSession.id ? updatedSession : session)
         .toList()
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
   }
@@ -281,12 +296,112 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
           source: response.sources.isEmpty
               ? 'UniGuide'
               : 'UniGuide - ${response.sources.first}',
-          diagram: response.diagram?.hasContent ?? false ? response.diagram : null,
+          diagram:
+              response.diagram?.hasContent ?? false ? response.diagram : null,
         ),
       ]);
     } catch (error) {
       await _saveMessagesForSession(sessionId, [
         ...pendingMessages,
+        ChatMessage(
+          text: error.toString().replaceFirst('Exception: ', ''),
+          isUser: false,
+          source: 'System',
+        ),
+      ]);
+    }
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+    _scrollToBottom();
+  }
+
+  Future<void> _editUserMessage(int messageIndex) async {
+    if (_isInitializing || _isLoading) return;
+    if (messageIndex < 0 || messageIndex >= _messages.length) return;
+
+    final message = _messages[messageIndex];
+    if (!message.isUser) return;
+
+    final controller = TextEditingController(text: message.text);
+    final editedText = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit message'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 3,
+            maxLines: 8,
+            decoration: const InputDecoration(
+              hintText: 'Update your message',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+
+    if (editedText == null ||
+        editedText.isEmpty ||
+        editedText == message.text.trim()) {
+      return;
+    }
+
+    final sessionId = _activeSession.id;
+    final retainedMessages = _messages.take(messageIndex).toList();
+    final editedMessages = [
+      ...retainedMessages,
+      ChatMessage(
+        text: editedText,
+        isUser: true,
+        timestamp: message.timestamp,
+      ),
+    ];
+
+    setState(() {
+      _replaceSession(
+        _activeSession.copyWith(
+          messages: editedMessages,
+          title: _deriveTitle(editedMessages),
+          updatedAt: DateTime.now(),
+        ),
+      );
+      _isLoading = true;
+    });
+
+    await _persistChats();
+    _scrollToBottom();
+
+    try {
+      final response = await _apiService.getRAGResponse(editedText);
+      await _saveMessagesForSession(sessionId, [
+        ...editedMessages,
+        ChatMessage(
+          text: response.answer,
+          isUser: false,
+          source: response.sources.isEmpty
+              ? 'UniGuide'
+              : 'UniGuide - ${response.sources.first}',
+          diagram:
+              response.diagram?.hasContent ?? false ? response.diagram : null,
+        ),
+      ]);
+    } catch (error) {
+      await _saveMessagesForSession(sessionId, [
+        ...editedMessages,
         ChatMessage(
           text: error.toString().replaceFirst('Exception: ', ''),
           isUser: false,
@@ -345,7 +460,8 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
     }
 
     setState(() {
-      _chatSessions = _chatSessions.where((session) => session.id != chatId).toList();
+      _chatSessions =
+          _chatSessions.where((session) => session.id != chatId).toList();
       if (_activeChatId == chatId) {
         _activeChatId = _chatSessions.first.id;
       }
@@ -418,11 +534,141 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
     return 'Updated ${time.day}/${time.month}/${time.year}';
   }
 
-  void _toggleLogin() {
+  Future<void> _toggleLogin() async {
+    if (_isLoggedIn) {
+      await _persistChats();
+      await _chatStorageService.logout();
+      await _switchToUser(const ChatUser.guest());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Logged out. Guest chats loaded.')),
+      );
+      return;
+    }
+
+    await _showLoginDialog();
+  }
+
+  Future<void> _showLoginDialog() async {
+    final nameController = TextEditingController();
+    final passwordController = TextEditingController();
+
+    final credentials = await showDialog<_LoginCredentials>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Login'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: 'Login name',
+                  prefixIcon: Icon(Icons.person_outline_rounded),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: passwordController,
+                obscureText: true,
+                onSubmitted: (_) {
+                  Navigator.pop(
+                    context,
+                    _LoginCredentials(
+                      name: nameController.text,
+                      password: passwordController.text,
+                    ),
+                  );
+                },
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  prefixIcon: Icon(Icons.lock_outline_rounded),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(
+                  context,
+                  _LoginCredentials(
+                    name: nameController.text,
+                    password: passwordController.text,
+                  ),
+                );
+              },
+              child: const Text('Login'),
+            ),
+          ],
+        );
+      },
+    );
+
+    nameController.dispose();
+    passwordController.dispose();
+
+    if (credentials == null) return;
+
+    final result = await _chatStorageService.loginOrCreateUser(
+      name: credentials.name,
+      password: credentials.password,
+    );
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
+    );
+
+    if (!result.success || result.user == null) return;
+
+    await _persistChats();
+    await _switchToUser(result.user!);
+  }
+
+  Future<void> _switchToUser(ChatUser user) async {
+    final sessions = await _chatStorageService.loadSessions(userId: user.id);
+    final activeChatId = await _chatStorageService.loadActiveChatId(
+      userId: user.id,
+    );
+
+    if (!mounted) return;
+
     setState(() {
-      _isLoggedIn = !_isLoggedIn;
-      _studentName = _isLoggedIn ? 'Arindam' : 'Guest';
+      _currentUser = user;
+      _isLoggedIn = !user.isGuest;
+      _studentName = user.name;
+      if (sessions.isEmpty) {
+        final initialSession = _createFreshSession();
+        _chatSessions = [initialSession];
+        _activeChatId = initialSession.id;
+      } else {
+        _chatSessions = List<ChatSession>.from(sessions)
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+        final draftSession = _ensureDraftSession(_chatSessions);
+        _chatSessions
+          ..removeWhere((session) => session.id == draftSession.id)
+          ..insert(0, draftSession);
+        _activeChatId =
+            _chatSessions.any((session) => session.id == activeChatId)
+                ? activeChatId
+                : draftSession.id;
+      }
+      _chatController.clear();
+      _isLoading = false;
+      _selectedIndex = 0;
     });
+
+    await _chatStorageService.saveCurrentUser(user);
+    await _persistChats();
   }
 
   @override
@@ -437,94 +683,92 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
       },
       child: Scaffold(
         appBar: AppBar(
-        title: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [
-                    Color(0xFF163A66),
-                    Color(0xFF2C6CB2),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF2C6CB2).withValues(alpha: 0.18),
-                    blurRadius: 18,
-                    offset: const Offset(0, 8),
+          title: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [
+                      Color(0xFF163A66),
+                      Color(0xFF2C6CB2),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                ],
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF2C6CB2).withValues(alpha: 0.18),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.auto_awesome_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
               ),
-              child: const Icon(
-                Icons.auto_awesome_rounded,
-                color: Colors.white,
-                size: 22,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(_isLoggedIn ? _studentName : 'UniGuide'),
+                    Text(
+                      _selectedIndex == 0
+                          ? 'Study assistant for books, notes, and PYQs'
+                          : 'Browse academic resources quickly',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF64748B),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.92),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: const Color(0xFFD9E1EC)),
+              ),
+              child: TextButton.icon(
+                onPressed: _toggleLogin,
+                icon: Icon(
+                  _isLoggedIn ? Icons.logout_rounded : Icons.login_rounded,
+                  size: 16,
+                  color: const Color(0xFF1B4D8C),
+                ),
+                label: Text(
+                  _isLoggedIn ? 'Logout' : 'Login',
+                  style: const TextStyle(color: Color(0xFF1B4D8C)),
+                ),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(_isLoggedIn ? _studentName : 'UniGuide'),
-                  Text(
-                    _selectedIndex == 0
-                        ? 'Study assistant for books, notes, and PYQs'
-                        : 'Browse academic resources quickly',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF64748B),
-                    ),
-                  ),
-                ],
+            IconButton(
+              icon: const Icon(Icons.add_comment_outlined),
+              tooltip: 'New Chat',
+              onPressed: _newChat,
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: CircleAvatar(
+                backgroundColor: const Color(0xFF1B4D8C),
+                child: Text(
+                  _studentName[0],
+                  style: const TextStyle(color: Colors.white),
+                ),
               ),
             ),
           ],
         ),
-        actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: const Color(0xFFD9E1EC)),
-            ),
-            child: TextButton.icon(
-              onPressed: _toggleLogin,
-              icon: Icon(
-                _isLoggedIn
-                    ? Icons.logout_rounded
-                    : Icons.login_rounded,
-                size: 16,
-                color: const Color(0xFF1B4D8C),
-              ),
-              label: Text(
-                _isLoggedIn ? 'Logout' : 'Login',
-                style: const TextStyle(color: Color(0xFF1B4D8C)),
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.add_comment_outlined),
-            tooltip: 'New Chat',
-            onPressed: _newChat,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: CircleAvatar(
-              backgroundColor: const Color(0xFF1B4D8C),
-              child: Text(
-                _studentName[0],
-                style: const TextStyle(color: Colors.white),
-              ),
-            ),
-          ),
-        ],
-      ),
         drawer: isLargeScreen ? null : _buildDrawer(),
         bottomNavigationBar:
             isLargeScreen ? null : _buildMobileNavigation(theme),
@@ -799,6 +1043,7 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold>
                       messages: _messages,
                       isLoading: _isLoading,
                       scrollController: _scrollController,
+                      onEditUserMessage: _editUserMessage,
                     ),
                     AnimatedSwitcher(
                       duration: const Duration(milliseconds: 220),
@@ -1179,4 +1424,14 @@ class _NavItem {
   final String label;
   final IconData icon;
   final IconData selectedIcon;
+}
+
+class _LoginCredentials {
+  const _LoginCredentials({
+    required this.name,
+    required this.password,
+  });
+
+  final String name;
+  final String password;
 }

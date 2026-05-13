@@ -6,6 +6,7 @@ items_bp = Blueprint("items", __name__)
 # Base directory (D:\Uniguide\data)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 PDF_BASE_DIR = os.path.abspath(os.path.join(BASE_DIR, "data"))
+GENERAL_BUCKET = "General"
 
 
 # ---------------------------
@@ -21,6 +22,55 @@ def safe_join(base, *paths):
     return full_path
 
 
+def category_base_dir(category):
+    category_path = safe_join(PDF_BASE_DIR, category)
+    if not category_path:
+        return None
+
+    # Existing PYQ data is stored as data/pyqs/branch/cse/*.pdf.
+    branch_path = safe_join(category_path, "branch")
+    if category.lower() == "pyqs" and branch_path and os.path.isdir(branch_path):
+        return branch_path
+
+    return category_path
+
+
+def list_child_dirs(path):
+    if not path or not os.path.isdir(path):
+        return []
+    return sorted([
+        d for d in os.listdir(path)
+        if os.path.isdir(os.path.join(path, d))
+    ])
+
+
+def has_pdf_files(path):
+    if not path or not os.path.isdir(path):
+        return False
+    return any(file.lower().endswith(".pdf") for file in os.listdir(path))
+
+
+def build_file_payload(category, branch, *parts):
+    path = safe_join(category_base_dir(category), branch, *parts)
+    if not path or not os.path.isdir(path):
+        return None
+
+    files = []
+    relative_parts = [category, branch, *parts]
+    if category.lower() == "pyqs":
+        relative_parts = [category, "branch", branch, *parts]
+
+    for file in sorted(os.listdir(path)):
+        if file.lower().endswith(".pdf"):
+            relative_path = os.path.join(*relative_parts, file)
+            files.append({
+                "name": file,
+                "file_path": relative_path.replace("\\", "/")
+            })
+
+    return files
+
+
 # ---------------------------
 # Get Branches
 # ---------------------------
@@ -31,14 +81,11 @@ def get_branches():
     if not category:
         return jsonify({"error": "category required"}), 400
 
-    path = safe_join(PDF_BASE_DIR, category)
+    path = category_base_dir(category)
     if not path or not os.path.exists(path):
         return jsonify({"error": "Category not found"}), 404
 
-    branches = sorted([
-        d for d in os.listdir(path)
-        if os.path.isdir(os.path.join(path, d))
-    ])
+    branches = list_child_dirs(path)
 
     return jsonify({"branches": branches})
 
@@ -54,14 +101,14 @@ def get_semesters():
     if not category or not branch:
         return jsonify({"error": "category and branch required"}), 400
 
-    path = safe_join(PDF_BASE_DIR, category, branch)
+    base_dir = category_base_dir(category)
+    path = safe_join(base_dir, branch)
     if not path or not os.path.exists(path):
         return jsonify({"error": "Branch not found"}), 404
 
-    semesters = sorted([
-        d for d in os.listdir(path)
-        if os.path.isdir(os.path.join(path, d))
-    ])
+    semesters = list_child_dirs(path)
+    if has_pdf_files(path):
+        semesters.insert(0, GENERAL_BUCKET)
 
     return jsonify({"semesters": semesters})
 
@@ -78,14 +125,17 @@ def get_subjects():
     if not category or not branch or not semester:
         return jsonify({"error": "category, branch and semester required"}), 400
 
-    path = safe_join(PDF_BASE_DIR, category, branch, semester)
+    base_dir = category_base_dir(category)
+    if semester == GENERAL_BUCKET:
+        path = safe_join(base_dir, branch)
+    else:
+        path = safe_join(base_dir, branch, semester)
     if not path or not os.path.exists(path):
         return jsonify({"error": "Semester not found"}), 404
 
-    subjects = sorted([
-        d for d in os.listdir(path)
-        if os.path.isdir(os.path.join(path, d))
-    ])
+    subjects = list_child_dirs(path)
+    if has_pdf_files(path):
+        subjects.insert(0, GENERAL_BUCKET)
 
     return jsonify({"subjects": subjects})
 
@@ -103,18 +153,15 @@ def get_files():
     if not category or not branch or not semester or not subject:
         return jsonify({"error": "category, branch, semester and subject required"}), 400
 
-    path = safe_join(PDF_BASE_DIR, category, branch, semester, subject)
-    if not path or not os.path.exists(path):
-        return jsonify({"error": "Subject not found"}), 404
+    parts = []
+    if semester != GENERAL_BUCKET:
+        parts.append(semester)
+    if subject != GENERAL_BUCKET:
+        parts.append(subject)
 
-    files = []
-    for file in sorted(os.listdir(path)):
-        if file.lower().endswith(".pdf"):
-            relative_path = os.path.join(category, branch, semester, subject, file)
-            files.append({
-                "name": file,
-                "file_path": relative_path.replace("\\", "/")
-            })
+    files = build_file_payload(category, branch, *parts)
+    if files is None:
+        return jsonify({"error": "Subject not found"}), 404
 
     return jsonify({"files": files})
 

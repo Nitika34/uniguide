@@ -9,9 +9,11 @@ class ChatBubble extends StatelessWidget {
   const ChatBubble({
     super.key,
     required this.message,
+    this.onEdit,
   });
 
   final ChatMessage message;
+  final VoidCallback? onEdit;
 
   Future<void> _copyText(BuildContext context) async {
     if (message.text.trim().isEmpty) {
@@ -39,8 +41,7 @@ class ChatBubble extends StatelessWidget {
 
     final bubbleColor = isUser ? const Color(0xFF1B4D8C) : Colors.white;
     final textColor = isUser ? Colors.white : const Color(0xFF1B2430);
-    final borderColor =
-        isUser ? Colors.transparent : const Color(0xFFD9E1EC);
+    final borderColor = isUser ? Colors.transparent : const Color(0xFFD9E1EC);
 
     final timestamp = TimeOfDay.fromDateTime(message.timestamp).format(context);
 
@@ -51,7 +52,8 @@ class ChatBubble extends StatelessWidget {
           maxWidth: MediaQuery.of(context).size.width > 700 ? 620 : 420,
         ),
         child: GestureDetector(
-          onLongPress: () => _copyText(context),
+          onTap: () => _showMessageActions(context),
+          onLongPress: () => _showMessageActions(context),
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: bubbleColor,
@@ -97,7 +99,8 @@ class ChatBubble extends StatelessWidget {
                     ),
                   if (!isUser && (message.diagram?.hasContent ?? false)) ...[
                     ChatDiagramCard(diagram: message.diagram!),
-                    if (message.text.trim().isNotEmpty) const SizedBox(height: 12),
+                    if (message.text.trim().isNotEmpty)
+                      const SizedBox(height: 12),
                   ],
                   if (message.text.trim().isNotEmpty)
                     isUser
@@ -138,6 +141,21 @@ class ChatBubble extends StatelessWidget {
                             ),
                           ),
                         ),
+                      if (isUser && onEdit != null) ...[
+                        const SizedBox(width: 2),
+                        InkWell(
+                          onTap: onEdit,
+                          borderRadius: BorderRadius.circular(999),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(
+                              Icons.edit_rounded,
+                              size: 16,
+                              color: Colors.white.withValues(alpha: 0.88),
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ],
@@ -147,5 +165,43 @@ class ChatBubble extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _showMessageActions(BuildContext context) async {
+    final hasText = message.text.trim().isNotEmpty;
+    if (!hasText && onEdit == null) return;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (hasText)
+                ListTile(
+                  leading: const Icon(Icons.content_copy_rounded),
+                  title: const Text('Copy'),
+                  onTap: () => Navigator.pop(context, 'copy'),
+                ),
+              if (message.isUser && onEdit != null)
+                ListTile(
+                  leading: const Icon(Icons.edit_rounded),
+                  title: const Text('Edit'),
+                  onTap: () => Navigator.pop(context, 'edit'),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!context.mounted) return;
+    if (action == 'copy') {
+      await _copyText(context);
+    } else if (action == 'edit') {
+      onEdit?.call();
+    }
   }
 }
